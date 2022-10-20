@@ -13,30 +13,30 @@ from absa_data_utils import ABSATokenizer
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 import math
 datasets = [
-    './dat/dsc_json/Amazon_Instant_Video',
-    './dat/dsc_json/Apps_for_Android',
-    './dat/dsc_json/Automotive',
-    './dat/dsc_json/Baby',
-    './dat/dsc_json/Beauty',
-    './dat/dsc_json/Books',
-    './dat/dsc_json/CDs_and_Vinyl',
-    './dat/dsc_json/Cell_Phones_and_Accessories',
-    './dat/dsc_json/Clothing_Shoes_and_Jewelry',
-    './dat/dsc_json/Digital_Music',
-    './dat/dsc_json/Electronics',
-    './dat/dsc_json/Grocery_and_Gourmet_Food',
-    './dat/dsc_json/Health_and_Personal_Care',
-    './dat/dsc_json/Home_and_Kitchen',
-    './dat/dsc_json/Kindle_Store',
-    './dat/dsc_json/Movies_and_TV',
-    './dat/dsc_json/Musical_Instruments',
-    './dat/dsc_json/Office_Products',
-    './dat/dsc_json/Patio_Lawn_and_Garden',
-    './dat/dsc_json/Pet_Supplies',
-    './dat/dsc_json/Sports_and_Outdoors',
-    './dat/dsc_json/Tools_and_Home_Improvement',
-    './dat/dsc_json/Toys_and_Games',
-    './dat/dsc_json/Video_Games',
+    'TaskDrop/dat/dsc_json/Amazon_Instant_Video',
+    'TaskDrop/dat/dsc_json/Apps_for_Android',
+    'TaskDrop/dat/dsc_json/Automotive',
+    'TaskDrop/dat/dsc_json/Baby',
+    'TaskDrop/dat/dsc_json/Beauty',
+    'TaskDrop/dat/dsc_json/Books',
+    'TaskDrop/dat/dsc_json/CDs_and_Vinyl',
+    'TaskDrop/dat/dsc_json/Cell_Phones_and_Accessories',
+    'TaskDrop/dat/dsc_json/Clothing_Shoes_and_Jewelry',
+    'TaskDrop/dat/dsc_json/Digital_Music',
+    'TaskDrop/dat/dsc_json/Electronics',
+    'TaskDrop/dat/dsc_json/Grocery_and_Gourmet_Food',
+    'TaskDrop/dat/dsc_json/Health_and_Personal_Care',
+    'TaskDrop/dat/dsc_json/Home_and_Kitchen',
+    'TaskDrop/dat/dsc_json/Kindle_Store',
+    'TaskDrop/dat/dsc_json/Movies_and_TV',
+    'TaskDrop/dat/dsc_json/Musical_Instruments',
+    'TaskDrop/dat/dsc_json/Office_Products',
+    'TaskDrop/dat/dsc_json/Patio_Lawn_and_Garden',
+    'TaskDrop/dat/dsc_json/Pet_Supplies',
+    'TaskDrop/dat/dsc_json/Sports_and_Outdoors',
+    'TaskDrop/dat/dsc_json/Tools_and_Home_Improvement',
+    'TaskDrop/dat/dsc_json/Toys_and_Games',
+    'TaskDrop/dat/dsc_json/Video_Games',
             ]
 
 
@@ -72,7 +72,7 @@ def get(logger=None,args=None):
     taskcla=[]
 
     # Others
-    f_name = 'asc_random2'
+    f_name = 'TaskDrop//asc_random2'
 
     with open(f_name,'r') as f_random_seq:
         fseq=f_random_seq.readlines()
@@ -178,8 +178,8 @@ def get(logger=None,args=None):
     # for t in range(args.ntasks):
     #     data2[t]=data[args.ntasks-1-t]
     #     taskcla2.append(taskcla[args.ntasks-1-t])
-    torch.save(data,'./dat/bin/data24'+'_'+str(args.idrandom)+'.pt')
-    torch.save(taskcla,'./dat/bin/taskcla24'+'_'+str(args.idrandom)+'.pt')
+    torch.save(data,'TaskDrop/dat/bin/data24'+'_'+str(args.idrandom)+'.pt')
+    torch.save(taskcla,'TaskDrop/dat/bin/taskcla24'+'_'+str(args.idrandom)+'.pt')
     return data,taskcla
 
 

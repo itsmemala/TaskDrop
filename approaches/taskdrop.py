@@ -6,6 +6,10 @@ import torch
 import utils
 from tqdm import tqdm, trange
 
+import captum
+from captum.attr import IntegratedGradients
+
+
 rnn_weights = [
     'mcl.lstm.rnn.weight_ih_l0',
     'mcl.lstm.rnn.weight_hh_l0',
@@ -172,7 +176,7 @@ class Appr(object):
             real_b=input_ids.size(0)
             with torch.no_grad():
                 task=torch.autograd.Variable(torch.LongTensor([t]).cuda())
-            outputs = self.model.forward(task,input_ids, segment_ids, input_mask,which_type,s=self.smax)
+            outputs = self.model.forward(task,input_ids, segment_ids, input_mask, which_type, s=self.smax)
             output=outputs[0][t]
             loss=self.criterion(output,targets)
 
@@ -183,5 +187,25 @@ class Appr(object):
             total_loss+=loss.data.cpu().numpy().item()*real_b
             total_acc+=hits.sum().data.cpu().numpy().item()
             total_num+=real_b
+
+        # Initialize the attribution algorithm with the model
+        # The model needs to be in training mode for the backward call for gradient computation
+        # TODO: Is this really needed?
+        self.model.train()
+        integrated_gradients = IntegratedGradients(self.model)
+        # Ask the algorithm to attribute our output target to input features
+        # TODO: Increase n_steps
+        # print('input:',input_ids[0:1])
+        # print('additional fwd args:', task, input_ids[0:1], segment_ids[0:1], input_mask[0:1], which_type, self.smax)
+        # print('target:',targets[0:1])
+        input_embedding=self.model.bert(input_ids=input_ids[0:1], token_type_ids=segment_ids[0:1], attention_mask=input_mask[0:1])
+        # print(input_embedding['last_hidden_state'])
+        attributions_ig = integrated_gradients.attribute(inputs=input_embedding['last_hidden_state']
+                                                        # Note: Attributions are not computed with respect to these additional arguments
+                                                        , additional_forward_args=(task, segment_ids[0:1], input_mask[0:1]
+                                                                                    , which_type, self.smax
+                                                                                    , -1, 1)
+                                                        , target=targets[0:1], n_steps=10)
+        print('attributions:',attributions_ig)
 
         return total_loss/total_num,total_acc/total_num

@@ -35,9 +35,18 @@ class Net(torch.nn.Module):
 
         return
 
-    def forward(self,t, input_ids, segment_ids, input_mask, which_type,s,mask_id=-1):
-        res = self.bert(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)
-        sequence_output = res['last_hidden_state']
+    def forward(self,t, input_ids, segment_ids, input_mask, which_type, s, mask_id=-1, my_debug=0):
+        if my_debug==1:
+            # When using captum integrated gradients, the assumption is that the first argument of forward() is the input
+            # Since TaskDrop deviates from this argument structure, we need to fix the argument assignment manually
+            # Additionally, gradients cannot be calculated for the embedding layer so we pre-calculate it
+            temp_sequence_output = t
+            t = input_ids
+            sequence_output = temp_sequence_output
+            # print(t, input_ids, segment_ids, input_mask, which_type, s)
+        else:
+            res = self.bert(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)
+            sequence_output = res['last_hidden_state']
 
         gfc=self.ac.mask(t=t,s=s,mask_id=mask_id)
 
@@ -52,6 +61,13 @@ class Net(torch.nn.Module):
             h=self.relu(mcl_hidden)
 
         #loss ==============
+        if my_debug==1:
+        # TODO: Check that mcl_hidden is not needed
+        # When using captum integrated gradients, return only the output of the head for the current task
+            # print(y)
+            current_task_id = t[0]
+            return self.last[current_task_id](h)
+
         y=[]
         for t,i in self.taskcla:
             y.append(self.last[t](h))

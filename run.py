@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 args = set_args()
 
-args.output='./res/'+'dis_'+args.experiment+'_'+args.approach+'_'+str(args.note)+'.txt'
+args.output='TaskDrop/res/'+'dis_'+args.experiment+'_'+args.approach+'_'+str(args.note)+'.txt'
 performance_output=args.output+'_performance'
 performance_output_forward=args.output+'_forward_performance'
 performance_saving=args.output+'.pt'
@@ -139,7 +139,7 @@ for t,ncla in taskcla:
     np.savetxt(args.output,acc,'%.4f',delimiter='\t')
 
     # appr.decode(train_dataloader)
-    # break
+    break
 
 # Done
 print('*'*100)
@@ -158,4 +158,4 @@ print('[Elapsed time = {:.1f} h]'.format((time.time()-tstart)/(60*60)))
 torch.save((acc,lss),performance_saving)
 
 if args.save_model=='yes':
-    torch.save(appr,'./res/model/'+args.approach+'_'+str(args.note)+'.pt')
+    torch.save(appr,'TaskDrop/res/model/'+args.approach+'_'+str(args.note)+'.pt')
