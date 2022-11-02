@@ -39,7 +39,7 @@ class Net(torch.nn.Module):
         if my_debug==1:
             # When using captum integrated gradients, the assumption is that the first argument of forward() is the input
             # Since TaskDrop deviates from this argument structure, we need to fix the argument assignment manually
-            # Additionally, gradients cannot be calculated for the embedding layer so we pre-calculate it
+            # Additionally, gradients cannot be calculated for the embedding layer so we take the embeddings outside the forward call
             temp_sequence_output = t
             t = input_ids
             sequence_output = temp_sequence_output
@@ -62,8 +62,8 @@ class Net(torch.nn.Module):
 
         #loss ==============
         if my_debug==1:
+        # When using captum for attributions, return only the output of the head for the current task
         # TODO: Check that mcl_hidden is not needed
-        # When using captum integrated gradients, return only the output of the head for the current task
             # print(y)
             current_task_id = t[0]
             return self.last[current_task_id](h)

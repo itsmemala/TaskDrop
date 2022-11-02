@@ -1,5 +1,6 @@
 import sys,os,argparse,time
 import numpy as np
+import pickle
 import torch
 from config import set_args
 import utils
@@ -114,10 +115,27 @@ for t,ncla in taskcla:
     valid_sampler = SequentialSampler(valid)
     valid_dataloader = DataLoader(valid, sampler=valid_sampler, batch_size=args.eval_batch_size)
 
+    # Save train data tokens
+    print(len(data[t]['train_tokens'][0]))
+    print(data[t]['train_tokens'][0])
+    with open("/content/gdrive/MyDrive/taskdrop_attributions/inputtokens_task"+str(t)+".txt", "wb") as internal_filename:
+        pickle.dump(data[t]['train_tokens'], internal_filename)
 
+
+    if t>0:
+        # Calculate attributions on new tasks before training
+        targets, predictions, attributions_ig = appr.eval(u,train_dataloader,'mcl',my_debug=1)
+        np.savez_compressed('/content/gdrive/MyDrive/taskdrop_attributions/attributions_model'+str(t-1)+'task'+str(t)
+                            ,targets=targets.cpu()
+                            ,predictions=predictions.cpu()
+                            ,attributions_ig=attributions_ig.cpu()
+                            #,attributions_lrp=attributions_lrp
+                            )
+
+    # Train
     appr.train(task,train_dataloader,valid_dataloader,args)
     print('-'*100)
-    #
+
 
     # Test
     for u in range(t+1):
@@ -133,13 +151,26 @@ for t,ncla in taskcla:
         print('>>> Test on task {:2d} - {:15s}: loss={:.3f}, acc={:5.1f}% <<<'.format(u,data[u]['name'],test_loss,100*test_acc))
         acc[t,u]=test_acc
         lss[t,u]=test_loss
+        
+        # Calculate attributions on all previous tasks and current task after training
+        train = data[u]['train']
+        train_sampler = RandomSampler(train)
+        train_dataloader = DataLoader(train, sampler=train_sampler, batch_size=args.train_batch_size)
+        targets, predictions, attributions_ig = appr.eval(u,train_dataloader,'mcl',my_debug=1)
+        np.savez_compressed('/content/gdrive/MyDrive/taskdrop_attributions/attributions_model'+str(t)+'task'+str(u)
+                            ,targets=targets.cpu()
+                            ,predictions=predictions.cpu()
+                            ,attributions_ig=attributions_ig.cpu()
+                            #,attributions_lrp=attributions_lrp
+                            )
 
     # Save
     print('Save at '+args.output)
     np.savetxt(args.output,acc,'%.4f',delimiter='\t')
 
     # appr.decode(train_dataloader)
-    break
+    if t>3:
+        break
 
 # Done
 print('*'*100)
