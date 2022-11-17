@@ -81,6 +81,9 @@ appr=approach.Appr(net,logger=logger,args=args)
 acc=np.zeros((len(taskcla),len(taskcla)),dtype=np.float32)
 lss=np.zeros((len(taskcla),len(taskcla)),dtype=np.float32)
 
+my_save_path = '/content/gdrive/MyDrive/nomask_bigru8e_sum_occ_max_attributions/'
+# my_save_path = '/content/gdrive/MyDrive/taskdrop_test_attributions/'
+
 for t,ncla in taskcla:
 
     print('*'*100)
@@ -116,19 +119,26 @@ for t,ncla in taskcla:
     valid_dataloader = DataLoader(valid, sampler=valid_sampler, batch_size=args.eval_batch_size)
 
     # Save train data tokens
-    print(len(data[t]['train_tokens'][0]))
-    print(data[t]['train_tokens'][0])
-    with open("/content/gdrive/MyDrive/taskdrop_attributions/inputtokens_task"+str(t)+".txt", "wb") as internal_filename:
+    # print(len(data[t]['train_tokens'][0]))
+    # print(data[t]['train_tokens'][0])
+    # print(len(data[t]['train_tokens']))
+    # print(len(data[t]['train']))
+    with open(my_save_path+"inputtokens_task"+str(t)+".txt", "wb") as internal_filename:
         pickle.dump(data[t]['train_tokens'], internal_filename)
 
-
     if t>0:
+        # Retain the order of the dataset, i.e. no shuffling, for comparing attributions at different points
+        train_sampler_saving = SequentialSampler(train)
+        train_dataloader_saving = DataLoader(train, sampler=train_sampler_saving, batch_size=args.train_batch_size)
+
         # Calculate attributions on new tasks before training
-        targets, predictions, attributions_ig = appr.eval(u,train_dataloader,'mcl',my_debug=1)
-        np.savez_compressed('/content/gdrive/MyDrive/taskdrop_attributions/attributions_model'+str(t-1)+'task'+str(t)
+        targets, predictions, attributions_ig, attributions_ig_indices = appr.eval(t,train_dataloader_saving,'mcl'
+                                                                                    ,my_debug=1,input_tokens=data[t]['train_tokens'])
+        np.savez_compressed(my_save_path+'attributions_model'+str(t-1)+'task'+str(t)
                             ,targets=targets.cpu()
                             ,predictions=predictions.cpu()
                             ,attributions_ig=attributions_ig.cpu()
+                            ,attributions_ig_indices=attributions_ig_indices.cpu()
                             #,attributions_lrp=attributions_lrp
                             )
 
@@ -154,13 +164,15 @@ for t,ncla in taskcla:
         
         # Calculate attributions on all previous tasks and current task after training
         train = data[u]['train']
-        train_sampler = RandomSampler(train)
+        train_sampler = SequentialSampler(train) # Retain the order of the dataset, i.e. no shuffling
         train_dataloader = DataLoader(train, sampler=train_sampler, batch_size=args.train_batch_size)
-        targets, predictions, attributions_ig = appr.eval(u,train_dataloader,'mcl',my_debug=1)
-        np.savez_compressed('/content/gdrive/MyDrive/taskdrop_attributions/attributions_model'+str(t)+'task'+str(u)
+        targets, predictions, attributions_ig, attributions_ig_indices = appr.eval(u,train_dataloader,'mcl'
+                                                                                    ,my_debug=1,input_tokens=data[u]['train_tokens'])
+        np.savez_compressed(my_save_path+'attributions_model'+str(t)+'task'+str(u)
                             ,targets=targets.cpu()
                             ,predictions=predictions.cpu()
                             ,attributions_ig=attributions_ig.cpu()
+                            ,attributions_ig_indices=attributions_ig_indices.cpu()
                             #,attributions_lrp=attributions_lrp
                             )
 
@@ -169,8 +181,8 @@ for t,ncla in taskcla:
     np.savetxt(args.output,acc,'%.4f',delimiter='\t')
 
     # appr.decode(train_dataloader)
-    if t>3:
-        break
+    # if t==0:
+        # break
 
 # Done
 print('*'*100)

@@ -27,7 +27,7 @@ class Net(torch.nn.Module):
 
         self.last=torch.nn.ModuleList()
         for t,n in self.taskcla:
-            self.last.append(torch.nn.Linear(args.bert_hidden_size,n))
+            self.last.append(torch.nn.Linear(args.bert_hidden_size,n)) # Multiply by 2 for bidirectional gru with concat
 
         
         print('BERT (Fixed) + GRU + KAN')
@@ -52,8 +52,9 @@ class Net(torch.nn.Module):
 
         if which_type == 'train':
             mcl_output,mcl_hidden = self.mcl.gru(sequence_output)
-            if t == 0: mcl_hidden = mcl_hidden*torch.ones_like(gfc.expand_as(mcl_hidden)) # everyone open
-            else: mcl_hidden=mcl_hidden*gfc.expand_as(mcl_hidden)
+            # Commented out the masking operation
+            # if t == 0: mcl_hidden = mcl_hidden*torch.ones_like(gfc.expand_as(mcl_hidden)) # everyone open
+            # else: mcl_hidden=mcl_hidden*gfc.expand_as(mcl_hidden)
             h=self.relu(mcl_hidden)
 
         elif which_type == 'test':
@@ -66,6 +67,7 @@ class Net(torch.nn.Module):
         # TODO: Check that mcl_hidden is not needed
             # print(y)
             current_task_id = t[0]
+            # print('current_task_id':, t, t[0])
             return self.last[current_task_id](h)
 
         y=[]
@@ -77,7 +79,7 @@ class Net(torch.nn.Module):
     def get_view_for(self,n,mask):
         if n=='mcl.gru.rnn.weight_ih_l0':
             # print('not none')
-            return mask.data.view(1,-1).expand_as(self.mcl.gru.rnn.weight_ih_l0)
+            return mask.data.view(1,-1).expand_as(self.mcl.gru.rnn.weight_ih_l0) # Change this for bidirectional gru with summing
         elif n=='mcl.gru.rnn.weight_hh_l0':
             return mask.data.view(1,-1).expand_as(self.mcl.gru.rnn.weight_hh_l0)
         elif n=='mcl.gru.rnn.bias_ih_l0':
@@ -96,13 +98,14 @@ class AC(nn.Module):
                     embedding_dim = args.bert_hidden_size,
                     hidden_dim = args.bert_hidden_size,
                     n_layers=1,
-                    bidirectional=False,
+                    # bidirectional=False,
+                    bidirectional=True,
                     dropout=0.5,
                     args=args)
 
         self.efc=torch.nn.Embedding(args.num_task,args.bert_hidden_size)
         self.gate=torch.nn.Sigmoid()
-        self.random_mask=torch.zeros([args.ntasks,args.bert_hidden_size]).cuda()
+        self.random_mask=torch.zeros([args.ntasks,2*args.bert_hidden_size]).cuda() # Multiply by 2 for bidirectional gru with concat
         if args.multi_mask>1:
             self.mask_pool=torch.zeros([args.multi_mask,args.bert_hidden_size]).cuda()
     def mask(self,t,s=1,mask_id=-1):
@@ -123,7 +126,8 @@ class MCL(nn.Module):
                     embedding_dim = args.bert_hidden_size,
                     hidden_dim = args.bert_hidden_size,
                     n_layers=1,
-                    bidirectional=False,
+                    # bidirectional=False,
+                    bidirectional=True,
                     dropout=0.5,
                     args=args)
 
@@ -139,10 +143,31 @@ class GRU(nn.Module):
                            dropout=dropout,
                            batch_first=True)
         self.args = args
+        self.bidirectional = bidirectional
 
     def forward(self, x):
         output, hidden = self.rnn(x)
-        hidden = hidden.view(-1,self.args.bert_hidden_size)
-        output = output.view(-1,self.args.max_seq_length,self.args.bert_hidden_size)
+        if self.bidirectional:
+            # print('hidden dimension:',hidden.shape)
+            hidden_1 = hidden.view(-1,2,self.args.bert_hidden_size)[:,0,:]
+            hidden_2 = hidden.view(-1,2,self.args.bert_hidden_size)[:,1,:]
+            # print('hidden dimension after view:',hidden_1.shape,hidden_2.shape)
+            hidden = hidden_1 + hidden_2
+            # print('summed hidden dimension:',hidden.shape)
+            # hidden = torch.cat((hidden_1, hidden_2), dim=1)
+            # print('concated hidden dimension:',hidden.shape)
+            # print('output dimension:',output.shape)
+            output_1 = output.view(-1,self.args.max_seq_length,2,self.args.bert_hidden_size)[:,:,0,:]
+            output_2 = output.view(-1,self.args.max_seq_length,2,self.args.bert_hidden_size)[:,:,1,:]
+            # print('output dimension after view:',output_1.shape,output_2.shape)
+            output = output_1 + output_2
+            # print('summed output dimension:',output.shape)
+            # output = output.view(-1,self.args.max_seq_length,2*self.args.bert_hidden_size)
+            # print('concated output dimension:',output.shape)
+        else:
+            hidden = hidden.view(-1,self.args.bert_hidden_size)
+            # print('output dimension:',output.shape)
+            output = output.view(-1,self.args.max_seq_length,self.args.bert_hidden_size)
+            # print('output dimension after view:',output.shape)
 
         return output,hidden

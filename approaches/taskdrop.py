@@ -7,7 +7,7 @@ import utils
 from tqdm import tqdm, trange
 
 import captum
-from captum.attr import IntegratedGradients, LRP, configure_interpretable_embedding_layer, remove_interpretable_embedding_layer
+from captum.attr import IntegratedGradients, LRP, Occlusion, configure_interpretable_embedding_layer, remove_interpretable_embedding_layer
 
 
 rnn_weights = [
@@ -62,7 +62,7 @@ class Appr(object):
         # else: which_types = ['ac','mcl']
 
         which_types = ['mcl']
-        self.model.ac.random_mask[t]=torch.randint(0,2,(1,args.bert_hidden_size))
+        self.model.ac.random_mask[t]=torch.randint(0,2,(1,2*args.bert_hidden_size)) # Multiply by 2 for bidirectional gru
 
         for which_type in which_types:
 
@@ -73,7 +73,7 @@ class Appr(object):
             self.optimizer=self._get_optimizer(lr,which_type)
 
             # Loop epochs
-            self.nepochs=2
+            self.nepochs=8
             for e in range(self.nepochs):
                 # Train
                 clock0=time.time()
@@ -127,6 +127,7 @@ class Appr(object):
             outputs=self.model.forward(task,input_ids, segment_ids, input_mask,which_type,s)
             output=outputs[0][t]
             loss=self.criterion(output,targets)
+            
             iter_bar.set_description('Train Iter (loss=%5.3f)' % loss.item())
 
             # Backward
@@ -137,11 +138,13 @@ class Appr(object):
             task=torch.autograd.Variable(torch.LongTensor([t]).cuda(),volatile=False)
             mask=self.model.ac.mask(task,s=self.smax)
             mask = torch.autograd.Variable(mask.data.clone(),requires_grad=False)
-            for n,p in self.model.named_parameters():
-                if n in rnn_weights:
-                    # print('n: ',n)
-                    # print('p: ',p.grad.size())
-                    p.grad.data*=self.model.get_view_for(n,mask)
+            # Commented out the masking operation - start
+            # for n,p in self.model.named_parameters():
+                # if n in rnn_weights:
+                    # # print('n: ',n)
+                    # # print('p: ',p.grad.size())
+                    # p.grad.data*=self.model.get_view_for(n,mask)
+                    # Commented out the masking operation - end
 
             # Compensate embedding gradients
             # for n,p in self.model.ac.named_parameters():
@@ -161,14 +164,14 @@ class Appr(object):
 
         return
 
-    def eval(self,t,data,which_type, my_debug=0):
+    def eval(self,t,data,which_type,my_debug=0,input_tokens=None):
         which_type='test'
         total_loss=0
         total_acc=0
         total_num=0
         self.model.eval()
 
-
+        example_id = -1
         for step, batch in enumerate(data):
             batch = [
                 bat.to(self.device) if bat is not None else None for bat in batch]
@@ -190,27 +193,49 @@ class Appr(object):
 
             # Extract attributions only for the training data, once the model has been trained
             if my_debug==1:
-                # Initialize the attribution algorithm with the model
-                # The model needs to be in training mode for the backward call for gradient computation
-                # TODO: Is this really needed?
-                self.model.train()
-                integrated_gradients = IntegratedGradients(self.model)
-                # Ask the algorithm to attribute our output target to input features
-                # TODO: Increase n_steps, identify baseline
-                # print('input:',input_ids[0:1])
-                # print('additional fwd args:', task, input_ids[0:1], segment_ids[0:1], input_mask[0:1], which_type, self.smax)
-                # print('target:',targets[0:1])
-                input_embedding=self.model.bert(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)
-                # print('Input:',input_embedding['last_hidden_state'].shape, input_embedding['last_hidden_state'].dtype)
-                attributions_ig_b = integrated_gradients.attribute(inputs=input_embedding['last_hidden_state']
-                                                                    # Note: Attributions are not computed with respect to these additional arguments
-                                                                    , additional_forward_args=(task, segment_ids, input_mask
-                                                                                                , which_type, self.smax
-                                                                                                , -1, 1)
-                                                                    , target=pred, n_steps=10)
-                # Sum the attributions of embeddings per token
-                attributions_ig_b = torch.sum(attributions_ig_b, dim=2)
-                # print('IG attributions:',attributions_ig.shape)
+                # # Initialize the attribution algorithm with the model
+                # # The model needs to be in training mode for the backward call for gradient computation (per error message)
+                # # TODO: Is this really needed? Documentation for example does not have this.
+                # self.model.train()
+                # integrated_gradients = IntegratedGradients(self.model)
+                # # Ask the algorithm to attribute our output target to input features
+                # # TODO: Increase n_steps, identify baseline
+                # # print('input:',input_ids[0:1])
+                # # print('additional fwd args:', task, input_ids[0:1], segment_ids[0:1], input_mask[0:1], which_type, self.smax)
+                # # print('target:',targets[0:1])
+                # input_embedding = self.model.bert(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)['last_hidden_state']
+                # # Construct custom baseline per input sample
+                # for i,example_input_embedding in enumerate(input_embedding):
+                    # # Count the example id to index the tokens for getting token length excl CLS, SEP and padding tokens
+                    # example_id += 1
+                    # # print(example_input_embedding[0,:].shape)
+                    # # print(torch.zeros([len(input_tokens[example_id]),768]).shape)
+                    # # print(example_input_embedding[len(input_tokens[example_id])+1:,:].shape)
+                    # # print('\n example input embedding shape:',example_input_embedding.shape)
+                    # example_baseline_embedding = torch.cat((example_input_embedding[0,:].reshape([1,768]) # CLS token
+                                                            # ,torch.zeros([len(input_tokens[example_id]),768]).to("cuda:0") # Actual input tokens
+                                                            # ,example_input_embedding[len(input_tokens[example_id])+1:,:]) # SEP and PAD tokens
+                                                        # , axis=0).reshape([1,128,768])
+                    # if i==0:
+                        # baseline_embedding = example_baseline_embedding
+                    # else:
+                        # baseline_embedding = torch.cat((baseline_embedding,example_baseline_embedding), axis=0)
+                # # print(input_embedding[0])
+                # # print(baseline_embedding[0])
+                # # print('Input:',input_embedding.shape, input_embedding.dtype)
+                # # print('Baseline:',baseline_embedding.shape, baseline_embedding.dtype)
+                # attributions_ig_b = integrated_gradients.attribute(inputs=input_embedding
+                                                                    # # Note: Attributions are not computed with respect to these additional arguments
+                                                                    # , additional_forward_args=(task, segment_ids, input_mask
+                                                                                                # , which_type, self.smax
+                                                                                                # , -1, 1)
+                                                                    # , target=pred, n_steps=10
+                                                                    # ,baselines=(baseline_embedding))
+                # # Get the max attribution across embeddings per token
+                # # attributions_ig_b = torch.sum(attributions_ig_b, dim=2)
+                # attributions_ig_b, attributions_ig_indices_b = torch.max(attributions_ig_b, dim=2) # Note: If multiple max exists, only the first is returned
+                # # print('IG attributions:',attributions_ig.shape)
+                
                 # # interpretable_emb = configure_interpretable_embedding_layer(self.model, 'bert')
                 # print(list(self.model.children()))
                 # lrp = LRP(torch.nn.Sequential(*list(self.model.children())[1:]))
@@ -224,18 +249,38 @@ class Appr(object):
                                                 # , target=pred)
                 # # remove_interpretable_embedding_layer(self.model, interpretable_emb)
                 # print('LRP attributions:',attributions_lrp.shape)
+                
+                occlusion = Occlusion(self.model)
+                input_embedding=self.model.bert(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)['last_hidden_state']
+                # baseline_embedding = self.model.bert()
+                attributions_occ_b = occlusion.attribute(inputs=input_embedding
+                                                        # Note: Attributions are not computed with respect to these additional arguments
+                                                        , additional_forward_args=(task, segment_ids, input_mask
+                                                                                    , which_type, self.smax
+                                                                                    , -1, 1)
+                                                        , target=pred
+                                                        , sliding_window_shapes=(1,768))
+                attributions_occ_b, attributions_occ_indices_b = torch.max(attributions_occ_b, dim=2) # Note: If multiple max exists, only the first is returned
+                
                 if step==0:
-                    attributions_ig = attributions_ig_b
+                    # attributions_ig = attributions_ig_b
+                    # attributions_ig_indices = attributions_ig_indices_b
+                    attributions_occ = attributions_occ_b
+                    attributions_occ_indices = attributions_occ_indices_b
                     predictions = pred
                     class_targets = targets
                 else:
-                    attributions_ig = torch.cat((attributions_ig,attributions_ig_b), axis=0)
+                    # attributions_ig = torch.cat((attributions_ig,attributions_ig_b), axis=0)
+                    # attributions_ig_indices = torch.cat((attributions_ig_indices,attributions_ig_indices_b), axis=0)
+                    attributions_occ = torch.cat((attributions_occ,attributions_occ_b), axis=0)
+                    attributions_occ_indices = torch.cat((attributions_occ_indices,attributions_occ_indices_b), axis=0)
                     predictions = torch.cat((predictions,pred), axis=0)
                     class_targets = torch.cat((class_targets,targets), axis=0)
 
         if my_debug==1:    
-            print('IG attributions:',attributions_ig.shape)
+            # print('IG attributions:',attributions_ig.shape, attributions_ig_indices.shape)
+            # print('IG attributions:',attributions_occ.shape, attributions_occ_indices.shape)
             print('Predictions:',predictions.shape)
-            return class_targets, predictions, attributions_ig #, attributions_lrp
+            return class_targets, predictions, attributions_occ, attributions_occ_indices #attributions_ig, attributions_ig_indices, attributions_lrp
 
         return total_loss/total_num,total_acc/total_num
