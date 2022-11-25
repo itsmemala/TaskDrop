@@ -81,7 +81,7 @@ appr=approach.Appr(net,logger=logger,args=args)
 acc=np.zeros((len(taskcla),len(taskcla)),dtype=np.float32)
 lss=np.zeros((len(taskcla),len(taskcla)),dtype=np.float32)
 
-my_save_path = '/content/gdrive/MyDrive/nomask_bigru8e_sum_occ_max_attributions/'
+my_save_path = '/content/gdrive/MyDrive/nomask_myocc1occ2_attributions/'
 # my_save_path = '/content/gdrive/MyDrive/taskdrop_test_attributions/'
 
 for t,ncla in taskcla:
@@ -132,13 +132,15 @@ for t,ncla in taskcla:
         train_dataloader_saving = DataLoader(train, sampler=train_sampler_saving, batch_size=args.train_batch_size)
 
         # Calculate attributions on new tasks before training
-        targets, predictions, attributions_ig, attributions_ig_indices = appr.eval(t,train_dataloader_saving,'mcl'
-                                                                                    ,my_debug=1,input_tokens=data[t]['train_tokens'])
+        targets, predictions, attributions_occ1, attributions_occ2 = appr.eval(t,train_dataloader_saving,'mcl'
+                                                                                ,my_debug=1,input_tokens=data[t]['train_tokens'])
         np.savez_compressed(my_save_path+'attributions_model'+str(t-1)+'task'+str(t)
                             ,targets=targets.cpu()
                             ,predictions=predictions.cpu()
-                            ,attributions_ig=attributions_ig.cpu()
-                            ,attributions_ig_indices=attributions_ig_indices.cpu()
+                            ,attributions_occ1=attributions_ig.cpu()
+                            ,attributions_occ2=attributions_ig.cpu()
+                            # ,attributions_ig=attributions_occ.cpu()
+                            # ,attributions_ig_indices=attributions_ig_indices.cpu()
                             #,attributions_lrp=attributions_lrp
                             )
 
@@ -166,13 +168,15 @@ for t,ncla in taskcla:
         train = data[u]['train']
         train_sampler = SequentialSampler(train) # Retain the order of the dataset, i.e. no shuffling
         train_dataloader = DataLoader(train, sampler=train_sampler, batch_size=args.train_batch_size)
-        targets, predictions, attributions_ig, attributions_ig_indices = appr.eval(u,train_dataloader,'mcl'
-                                                                                    ,my_debug=1,input_tokens=data[u]['train_tokens'])
+        targets, predictions, attributions_occ1, attributions_occ2 = appr.eval(u,train_dataloader,'mcl'
+                                                                                ,my_debug=1,input_tokens=data[u]['train_tokens'])
         np.savez_compressed(my_save_path+'attributions_model'+str(t)+'task'+str(u)
                             ,targets=targets.cpu()
                             ,predictions=predictions.cpu()
-                            ,attributions_ig=attributions_ig.cpu()
-                            ,attributions_ig_indices=attributions_ig_indices.cpu()
+                            ,attributions_occ1=attributions_ig.cpu()
+                            ,attributions_occ2=attributions_ig.cpu()
+                            # ,attributions_ig=attributions_ig.detach().cpu()
+                            # ,attributions_ig_indices=attributions_ig_indices.cpu()
                             #,attributions_lrp=attributions_lrp
                             )
 

@@ -73,7 +73,7 @@ class Appr(object):
             self.optimizer=self._get_optimizer(lr,which_type)
 
             # Loop epochs
-            self.nepochs=8
+            self.nepochs=2
             for e in range(self.nepochs):
                 # Train
                 clock0=time.time()
@@ -250,30 +250,61 @@ class Appr(object):
                 # # remove_interpretable_embedding_layer(self.model, interpretable_emb)
                 # print('LRP attributions:',attributions_lrp.shape)
                 
-                occlusion = Occlusion(self.model)
-                input_embedding=self.model.bert(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)['last_hidden_state']
-                # baseline_embedding = self.model.bert()
-                attributions_occ_b = occlusion.attribute(inputs=input_embedding
-                                                        # Note: Attributions are not computed with respect to these additional arguments
-                                                        , additional_forward_args=(task, segment_ids, input_mask
-                                                                                    , which_type, self.smax
-                                                                                    , -1, 1)
-                                                        , target=pred
-                                                        , sliding_window_shapes=(1,768))
-                attributions_occ_b, attributions_occ_indices_b = torch.max(attributions_occ_b, dim=2) # Note: If multiple max exists, only the first is returned
+                # occlusion = Occlusion(self.model)
+                # input_embedding=self.model.bert(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)['last_hidden_state']
+                # sliding_window_shapes=(1,768)
+                # # baseline_embedding = self.model.bert()
+                # attributions_occ_b = occlusion.attribute(inputs=input_embedding
+                                                        # # Note: Attributions are not computed with respect to these additional arguments
+                                                        # , additional_forward_args=(task, segment_ids, input_mask
+                                                                                    # , which_type, self.smax
+                                                                                    # , -1, 1)
+                                                        # , target=pred
+                                                        # , sliding_window_shapes=sliding_window_shapes
+                                                        # )
+                # print(attributions_occ_b[0,0,:50])
+                # attributions_occ_b = torch.sum(attributions_occ_b, dim=2)
+                # # attributions_occ_b, attributions_occ_indices_b = torch.max(attributions_occ_b, dim=2) # Note: If multiple max exists, only the first is returned
+                
+                # My Occlusion
+                # print(input_ids.shape)
+                # print(len(input_ids[0]))
+                # print('--------------------------')
+                for token in range(len(input_ids[0]-2)): # loop through all tokens except CLS and SEP
+                    temp_input_ids = input_ids[:1,:].detach().clone() # using this instead of input_ids[0] maintains the 2D shape of the tensor
+                    temp_input_ids[0,token+1] = 0 # replace with padding token
+                    print(temp_input_ids)
+                    if token==0:
+                        my_input_ids = temp_input_ids
+                        my_segment_ids = segment_ids[:1,:]
+                        my_input_mask = input_mask[:1,:]
+                    else:
+                        my_input_ids = torch.cat((my_input_ids,temp_input_ids), axis=0)
+                        my_segment_ids = torch.cat((my_segment_ids,segment_ids[:1,:]), axis=0)
+                        my_input_mask = torch.cat((my_input_mask,input_mask[:1,:]), axis=0)
+                input_ids = my_input_ids
+                segment_ids = my_segment_ids
+                input_mask = my_input_mask
+                # print('--------------------------')
+                # print(input_ids.shape)
+                outputs = self.model.forward(task,input_ids, segment_ids, input_mask, which_type, s=self.smax)
+                output=outputs[0][t]
+                attributions_occ_b=output
+                _,pred=output.max(1)
+                
                 
                 if step==0:
                     # attributions_ig = attributions_ig_b
                     # attributions_ig_indices = attributions_ig_indices_b
                     attributions_occ = attributions_occ_b
-                    attributions_occ_indices = attributions_occ_indices_b
+                    # attributions_occ_indices = attributions_occ_indices_b
                     predictions = pred
                     class_targets = targets
                 else:
                     # attributions_ig = torch.cat((attributions_ig,attributions_ig_b), axis=0)
                     # attributions_ig_indices = torch.cat((attributions_ig_indices,attributions_ig_indices_b), axis=0)
                     attributions_occ = torch.cat((attributions_occ,attributions_occ_b), axis=0)
-                    attributions_occ_indices = torch.cat((attributions_occ_indices,attributions_occ_indices_b), axis=0)
+                    # attributions_occ_indices = torch.cat((attributions_occ_indices,attributions_occ_indices_b), axis=0)
                     predictions = torch.cat((predictions,pred), axis=0)
                     class_targets = torch.cat((class_targets,targets), axis=0)
 
@@ -281,6 +312,6 @@ class Appr(object):
             # print('IG attributions:',attributions_ig.shape, attributions_ig_indices.shape)
             # print('IG attributions:',attributions_occ.shape, attributions_occ_indices.shape)
             print('Predictions:',predictions.shape)
-            return class_targets, predictions, attributions_occ, attributions_occ_indices #attributions_ig, attributions_ig_indices, attributions_lrp
+            return class_targets, predictions, attributions_occ #, attributions_occ_indices #attributions_ig, attributions_ig_indices, attributions_lrp
 
         return total_loss/total_num,total_acc/total_num

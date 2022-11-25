@@ -98,8 +98,8 @@ class AC(nn.Module):
                     embedding_dim = args.bert_hidden_size,
                     hidden_dim = args.bert_hidden_size,
                     n_layers=1,
-                    # bidirectional=False,
-                    bidirectional=True,
+                    bidirectional=False,
+                    # bidirectional=True,
                     dropout=0.5,
                     args=args)
 
@@ -126,8 +126,8 @@ class MCL(nn.Module):
                     embedding_dim = args.bert_hidden_size,
                     hidden_dim = args.bert_hidden_size,
                     n_layers=1,
-                    # bidirectional=False,
-                    bidirectional=True,
+                    bidirectional=False,
+                    # bidirectional=True,
                     dropout=0.5,
                     args=args)
 
