@@ -53,6 +53,9 @@ elif args.experiment=='sim':
 elif args.experiment=='mix':
     args.ntasks=24
     from dataloaders import bert2 as dataloader
+elif args.experiment=='annomi':
+    args.ntasks=6
+    from dataloaders import bert_annomi as dataloader
 
 # Args -- Approach
 if args.approach=='taskdrop':
@@ -80,8 +83,10 @@ appr=approach.Appr(net,logger=logger,args=args)
 # Loop tasks
 acc=np.zeros((len(taskcla),len(taskcla)),dtype=np.float32)
 lss=np.zeros((len(taskcla),len(taskcla)),dtype=np.float32)
+f1=np.zeros((len(taskcla),len(taskcla)),dtype=np.float32)
 
-my_save_path = '/content/gdrive/MyDrive/nomask_myocc1occ2_attributions/'
+my_save_path = '/content/gdrive/MyDrive/nomask_annomi/'
+# my_save_path = '/content/gdrive/MyDrive/nomask_myocc_attributions/'
 # my_save_path = '/content/gdrive/MyDrive/taskdrop_test_attributions/'
 
 for t,ncla in taskcla:
@@ -118,31 +123,31 @@ for t,ncla in taskcla:
     valid_sampler = SequentialSampler(valid)
     valid_dataloader = DataLoader(valid, sampler=valid_sampler, batch_size=args.eval_batch_size)
 
-    # Save train data tokens
-    # print(len(data[t]['train_tokens'][0]))
-    # print(data[t]['train_tokens'][0])
-    # print(len(data[t]['train_tokens']))
-    # print(len(data[t]['train']))
-    with open(my_save_path+"inputtokens_task"+str(t)+".txt", "wb") as internal_filename:
-        pickle.dump(data[t]['train_tokens'], internal_filename)
+    # # Save train data tokens
+    # # print(len(data[t]['train_tokens'][0]))
+    # # print(data[t]['train_tokens'][0])
+    # # print(len(data[t]['train_tokens']))
+    # # print(len(data[t]['train']))
+    # with open(my_save_path+"inputtokens_task"+str(t)+".txt", "wb") as internal_filename:
+        # pickle.dump(data[t]['train_tokens'], internal_filename)
 
-    if t>0:
-        # Retain the order of the dataset, i.e. no shuffling, for comparing attributions at different points
-        train_sampler_saving = SequentialSampler(train)
-        train_dataloader_saving = DataLoader(train, sampler=train_sampler_saving, batch_size=args.train_batch_size)
+    # if t>0:
+        # # Retain the order of the dataset, i.e. no shuffling, for comparing attributions at different points
+        # train_sampler_saving = SequentialSampler(train)
+        # train_dataloader_saving = DataLoader(train, sampler=train_sampler_saving, batch_size=args.train_batch_size)
 
-        # Calculate attributions on new tasks before training
-        targets, predictions, attributions_occ1, attributions_occ2 = appr.eval(t,train_dataloader_saving,'mcl'
-                                                                                ,my_debug=1,input_tokens=data[t]['train_tokens'])
-        np.savez_compressed(my_save_path+'attributions_model'+str(t-1)+'task'+str(t)
-                            ,targets=targets.cpu()
-                            ,predictions=predictions.cpu()
-                            ,attributions_occ1=attributions_ig.cpu()
-                            ,attributions_occ2=attributions_ig.cpu()
-                            # ,attributions_ig=attributions_occ.cpu()
-                            # ,attributions_ig_indices=attributions_ig_indices.cpu()
-                            #,attributions_lrp=attributions_lrp
-                            )
+        # # Calculate attributions on new tasks before training
+        # targets, predictions, attributions_occ1 = appr.eval(t,train_dataloader_saving,'mcl'
+                                                                                # ,my_debug=1,input_tokens=data[t]['train_tokens'])
+        # np.savez_compressed(my_save_path+'attributions_model'+str(t-1)+'task'+str(t)
+                            # ,targets=targets.cpu()
+                            # ,predictions=predictions.cpu()
+                            # ,attributions_occ1=attributions_occ1
+                            # # ,attributions_occ2=attributions_ig.cpu()
+                            # # ,attributions_ig=attributions_occ.cpu()
+                            # # ,attributions_ig_indices=attributions_ig_indices.cpu()
+                            # #,attributions_lrp=attributions_lrp
+                            # )
 
     # Train
     appr.train(task,train_dataloader,valid_dataloader,args)
@@ -155,7 +160,7 @@ for t,ncla in taskcla:
         test_sampler = SequentialSampler(test)
         test_dataloader = DataLoader(test, sampler=test_sampler, batch_size=args.eval_batch_size)
         
-        test_loss,test_acc=appr.eval(u,test_dataloader,'mcl')
+        test_loss,test_acc,test_f1=appr.eval(u,test_dataloader,'mcl')
         # if 'kan' in args.approach:
         #     test_loss,test_acc=appr.eval(u,test_dataloader,'mcl')
         # else:
@@ -163,26 +168,28 @@ for t,ncla in taskcla:
         print('>>> Test on task {:2d} - {:15s}: loss={:.3f}, acc={:5.1f}% <<<'.format(u,data[u]['name'],test_loss,100*test_acc))
         acc[t,u]=test_acc
         lss[t,u]=test_loss
+        f1[t,u]=test_f1
         
-        # Calculate attributions on all previous tasks and current task after training
-        train = data[u]['train']
-        train_sampler = SequentialSampler(train) # Retain the order of the dataset, i.e. no shuffling
-        train_dataloader = DataLoader(train, sampler=train_sampler, batch_size=args.train_batch_size)
-        targets, predictions, attributions_occ1, attributions_occ2 = appr.eval(u,train_dataloader,'mcl'
-                                                                                ,my_debug=1,input_tokens=data[u]['train_tokens'])
-        np.savez_compressed(my_save_path+'attributions_model'+str(t)+'task'+str(u)
-                            ,targets=targets.cpu()
-                            ,predictions=predictions.cpu()
-                            ,attributions_occ1=attributions_ig.cpu()
-                            ,attributions_occ2=attributions_ig.cpu()
-                            # ,attributions_ig=attributions_ig.detach().cpu()
-                            # ,attributions_ig_indices=attributions_ig_indices.cpu()
-                            #,attributions_lrp=attributions_lrp
-                            )
+        # # Calculate attributions on all previous tasks and current task after training
+        # train = data[u]['train']
+        # train_sampler = SequentialSampler(train) # Retain the order of the dataset, i.e. no shuffling
+        # train_dataloader = DataLoader(train, sampler=train_sampler, batch_size=args.train_batch_size)
+        # targets, predictions, attributions_occ1 = appr.eval(u,train_dataloader,'mcl'
+                                                                                # ,my_debug=1,input_tokens=data[u]['train_tokens'])
+        # np.savez_compressed(my_save_path+'attributions_model'+str(t)+'task'+str(u)
+                            # ,targets=targets.cpu()
+                            # ,predictions=predictions.cpu()
+                            # ,attributions_occ1=attributions_ig
+                            # # ,attributions_occ2=attributions_ig.cpu()
+                            # # ,attributions_ig=attributions_ig.detach().cpu()
+                            # # ,attributions_ig_indices=attributions_ig_indices.cpu()
+                            # #,attributions_lrp=attributions_lrp
+                            # )
 
     # Save
     print('Save at '+args.output)
-    np.savetxt(args.output,acc,'%.4f',delimiter='\t')
+    # np.savetxt(args.output,acc,'%.4f',delimiter='\t')
+    np.savetxt(args.output,f1,'%.4f',delimiter='\t')
 
     # appr.decode(train_dataloader)
     # if t==0:
@@ -195,6 +202,12 @@ for i in range(acc.shape[0]):
     print('\t',end='')
     for j in range(acc.shape[1]):
         print('{:5.1f}% '.format(100*acc[i,j]),end='')
+    print()
+print('Macro F1 =')
+for i in range(f1.shape[0]):
+    print('\t',end='')
+    for j in range(f1.shape[1]):
+        print('{:5.1f}% '.format(100*f1[i,j]),end='')
     print()
 print('*'*100)
 print('Done!')
