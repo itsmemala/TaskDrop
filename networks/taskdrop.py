@@ -35,7 +35,7 @@ class Net(torch.nn.Module):
 
         return
 
-    def forward(self,t, input_ids, segment_ids, input_mask, which_type, s, mask_id=-1, my_debug=0):
+    def forward(self,t, input_ids, segment_ids, input_mask, which_type, s, mask_id=-1, my_debug=0, get_emb_ip=False):
         if my_debug==1:
             # When using captum integrated gradients, the assumption is that the first argument of forward() is the input
             # Since TaskDrop deviates from this argument structure, we need to fix the argument assignment manually
@@ -53,8 +53,8 @@ class Net(torch.nn.Module):
         if which_type == 'train':
             mcl_output,mcl_hidden = self.mcl.gru(sequence_output)
             # Commented out the masking operation
-            # if t == 0: mcl_hidden = mcl_hidden*torch.ones_like(gfc.expand_as(mcl_hidden)) # everyone open
-            # else: mcl_hidden=mcl_hidden*gfc.expand_as(mcl_hidden)
+            if t == 0: mcl_hidden = mcl_hidden*torch.ones_like(gfc.expand_as(mcl_hidden)) # everyone open
+            else: mcl_hidden=mcl_hidden*gfc.expand_as(mcl_hidden)
             h=self.relu(mcl_hidden)
 
         elif which_type == 'test':
@@ -73,6 +73,8 @@ class Net(torch.nn.Module):
         y=[]
         for t,i in self.taskcla:
             y.append(self.last[t](h))
+        if get_emb_ip:
+            return y,mcl_hidden,sequence_output
         return y,mcl_hidden
         # return y
 
@@ -105,7 +107,7 @@ class AC(nn.Module):
 
         self.efc=torch.nn.Embedding(args.num_task,args.bert_hidden_size)
         self.gate=torch.nn.Sigmoid()
-        self.random_mask=torch.zeros([args.ntasks,2*args.bert_hidden_size]).cuda() # Multiply by 2 for bidirectional gru with concat
+        self.random_mask=torch.zeros([args.ntasks,args.bert_hidden_size]).cuda() # Multiply by 2 for bidirectional gru with concat
         if args.multi_mask>1:
             self.mask_pool=torch.zeros([args.multi_mask,args.bert_hidden_size]).cuda()
     def mask(self,t,s=1,mask_id=-1):

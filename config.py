@@ -5,6 +5,7 @@ import multiprocessing
 import utils
 
 def asc_config(parser):
+    parser.add_argument('--lfa',default=None,type=str,required=False,help='(default=%(default)s)')
     parser.add_argument('--experiment',default='mix',type=str,required=True,help='(default=%(default)s)')
     parser.add_argument('--approach',default='taskdrop',type=str,required=True,help='(default=%(default)s)')
     parser.add_argument('--output',default='',type=str,required=False,help='(default=%(default)s)')

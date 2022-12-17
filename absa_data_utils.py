@@ -175,8 +175,10 @@ class AscProcessor(DataProcessor):
 
     def get_train_examples(self, data_dir, fn="train.json"):
         """See base class."""
-        return self._create_examples(
+        examples = self._create_examples(
             self._read_json(os.path.join(data_dir, fn)), "train")
+        # return examples
+        return examples[:250] + examples[-250:]
 
     def get_dev_examples(self, data_dir, fn="dev.json"):
         """See base class."""
@@ -204,7 +206,7 @@ class AscProcessor(DataProcessor):
             label = lines[ids]['polarity']
             examples.append(
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
-        return examples     
+        return examples
 
 
 class MIProcessor(DataProcessor):

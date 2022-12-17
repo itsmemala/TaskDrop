@@ -5,6 +5,7 @@ import torch
 # from copy import deepcopy
 
 import utils
+import attribution_utils
 from tqdm import tqdm, trange
 
 import captum
@@ -26,6 +27,8 @@ class Appr(object):
     # def __init__(self,model,nepochs=100,sbatch=64,lr=0.001,lr_min=1e-5,lr_factor=2,lr_patience=3,clipgrad=10000,args=None,logger=None):
         self.model=model
         # self.initial_model=deepcopy(model)
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print('Num of trainable params:',trainable_params)
 
         self.nepochs=nepochs
         self.sbatch=sbatch
@@ -35,7 +38,12 @@ class Appr(object):
         self.lr_patience=lr_patience
         self.clipgrad=clipgrad
 
-        self.criterion=torch.nn.CrossEntropyLoss()
+        if args.experiment=='annomi':
+            class_weights = [0.41, 0.89, 0.16] #'change': 0, 'sustain': 1, 'neutral': 2
+            class_weights = torch.FloatTensor(class_weights).cuda()
+            self.criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+        else:
+            self.criterion=torch.nn.CrossEntropyLoss()
         self.optimizer=self._get_optimizer()
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,7 +63,7 @@ class Appr(object):
         return torch.optim.SGD(
             [p for p in self.model.mcl.parameters()]+[p for p in self.model.last.parameters()],lr=lr)
 
-    def train(self,t,train,valid,args):
+    def train(self,t,train,valid,args,task_tokens=None,global_attr=None):
         # self.model=deepcopy(self.initial_model) # Restart model: isolate
 
 
@@ -63,7 +71,7 @@ class Appr(object):
         # else: which_types = ['ac','mcl']
 
         which_types = ['mcl']
-        self.model.ac.random_mask[t]=torch.randint(0,2,(1,2*args.bert_hidden_size)) # Multiply by 2 for bidirectional gru
+        self.model.ac.random_mask[t]=torch.randint(0,2,(1,args.bert_hidden_size)) # Multiply by 2 for bidirectional gru
 
         for which_type in which_types:
 
@@ -78,15 +86,16 @@ class Appr(object):
             for e in range(self.nepochs):
                 # Train
                 clock0=time.time()
-                iter_bar = tqdm(train, desc='Train Iter (loss=X.XXX)')
-                self.train_epoch(t,train,iter_bar,'train')
+                iter_bar = tqdm(train, desc='Train Iter (loss=X.XXX, ce loss=X.XXX, fa loss=X.XXX)')
+                # iter_bar = tqdm(train, desc='Train Iter (loss=X.XXX)')
+                self.train_epoch(t,train,iter_bar,'train',lfa=args.lfa,task_tokens=task_tokens,global_attr=global_attr)
                 clock1=time.time()
-                train_loss,train_acc=self.eval(t,train,'test')
+                train_loss,train_acc,_=self.eval(t,train,'test')
                 clock2=time.time()
                 print('| Epoch {:3d}, time={:5.1f}ms/{:5.1f}ms | Train: loss={:.3f}, acc={:5.1f}% |'.format(e+1,
                     1000*self.sbatch*(clock1-clock0)/len(train),1000*self.sbatch*(clock2-clock1)/len(train),train_loss,100*train_acc),end='')
                 # Valid
-                valid_loss,valid_acc=self.eval(t,valid,'test')
+                valid_loss,valid_acc,_=self.eval(t,valid,'test')
                 print(' Valid: loss={:.3f}, acc={:5.1f}% |'.format(valid_loss,100*valid_acc),end='')
                 # Adapt lr
                 if valid_loss<best_loss:
@@ -113,9 +122,10 @@ class Appr(object):
 
 
 
-    def train_epoch(self,t,data,iter_bar,which_type):
+    def train_epoch(self,t,data,iter_bar,which_type,lfa=None,task_tokens=None,global_attr=None):
         self.model.train()
         # Loop batches
+        batch_start_track = 0
         for step, batch in enumerate(iter_bar):
             batch = [
                 bat.to(self.device) if bat is not None else None for bat in batch]
@@ -124,12 +134,72 @@ class Appr(object):
             with torch.no_grad():
                 task=torch.autograd.Variable(torch.LongTensor([t]).cuda())
 
-            # Forward
-            outputs=self.model.forward(task,input_ids, segment_ids, input_mask,which_type,s)
-            output=outputs[0][t]
-            loss=self.criterion(output,targets)
+            if (lfa is not None) and (t>0):
+                # Forward
+                outputs=self.model.forward(task,input_ids, segment_ids, input_mask,which_type,s,get_emb_ip=True)
+                output=outputs[0][t]
+                embedded_input=outputs[2]
+                embedded_input.requires_grad=True
+                loss_ce=self.criterion(output,targets)
+                
+                _,pred=output.max(1)
+                batch_tokens = task_tokens[batch_start_track:(batch_start_track+len(input_ids))]
+                batch_start_track = len(input_ids)
+                
+                print('step:',step)
+                occ_mask = torch.ones((input_ids.shape[1]-2,input_ids.shape[1])).to('cuda:0')
+                for token in range(input_ids.shape[1]-2):
+                    occ_mask[token,token+1] = 0 # replace with padding token
+
+                for i in range(len(input_ids)): # loop through each input in the batch
+                    temp_input_ids = input_ids[i:i+1,:].detach().clone().to('cuda:0') # using input_ids[:1,:] instead of input_ids[0] maintains the 2D shape of the tensor
+                    my_input_ids = (temp_input_ids*occ_mask).long()
+                    my_segment_ids = segment_ids[i:i+1,:].repeat(segment_ids.shape[1]-2,1)
+                    my_input_mask = input_mask[i:i+1,:].repeat(input_mask.shape[1]-2,1)
+                    # print('--------------------------')
+                    # print(input_ids.shape)
+                    occ_output = self.model.forward(task,my_input_ids, my_segment_ids, my_input_mask, which_type, s=self.smax)[0][t]
+                    occ_output = torch.nn.Softmax(dim=1)(occ_output)
+                    actual_output = self.model.forward(task,input_ids[i:i+1,:], segment_ids[i:i+1,:], input_mask[i:i+1,:], which_type, s=self.smax)[0][t]
+                    actual_output = torch.nn.Softmax(dim=1)(actual_output)
+                    occ_output = torch.cat((actual_output,occ_output,actual_output), axis=0) # placeholder for CLS and SEP such that their attribution scores are 0
+                    _,actual_pred = actual_output.max(1)
+                    _,occ_pred=occ_output.max(1)
+                    # print(occ_output)
+                    # print(actual_output)
+                    attributions_occ1_b = torch.subtract(actual_output,occ_output)[:,[actual_pred.item()]] # attributions towards the predicted class
+                    attributions_occ1_b = torch.transpose(attributions_occ1_b, 0, 1)
+                    attributions_occ1_b = attributions_occ1_b.detach().cpu()
+                    if i==0:
+                        attributions_occ1 = attributions_occ1_b
+                    else:
+                        attributions_occ1 = torch.cat((attributions_occ1,attributions_occ1_b), axis=0)
+                batch_global_attr = attribution_utils.aggregate_local_to_global_batch(attributions_occ1,pred.cpu(),targets.cpu(),batch_tokens)
+                batch_global_attr, global_attr_subset = attribution_utils.get_common_features(batch_global_attr,global_attr)
+                
+                # A_pos = torch.abs(global_attr_subset['tp']-batch_global_attr['tp']) #+ 1/(torch.sum(torch.abs(global_attr_subset['fp']-batch_global_attr['fp'])))
+                loss_fa_pos = torch.autograd.grad(output[:,0], embedded_input, torch.ones_like(output[:,0]))
+                print(loss_fa_pos.shape)
+                print(loss_fa_pos)
+                
+                # A_neg = torch.abs(global_attr_subset['tn']-batch_global_attr['tn']) #+ 1/(torch.sum(torch.abs(global_attr_subset['fn']-batch_global_attr['fn'])))
+                loss_fa_neg = torch.autograd.grad(output[:,1], embedded_input, torch.ones_like(output[:,1]))
+                print(loss_fa_neg.shape)
+                print(loss_fa_neg)
+                
+                # loss_fa = loss_fa_pos + loss_fa_neg
+                loff_fa = 0
+                loss_fa = loss_fa.to('cuda:0')
+            else:
+                # Forward
+                outputs=self.model.forward(task,input_ids, segment_ids, input_mask,which_type,s)
+                output=outputs[0][t]
+                loss_ce=self.criterion(output,targets)
+                loss_fa=torch.Tensor([0]).to('cuda:0')
+            loss=loss_ce + loss_fa
             
-            iter_bar.set_description('Train Iter (loss=%5.3f)' % loss.item())
+            # iter_bar.set_description('Train Iter (loss=%5.3f)' % loss.item())
+            iter_bar.set_description('Train Iter (loss=%5.3f, ce loss=%5.3f, fa loss=%5.3f)' % (loss.item(), loss_ce.item(), loss_fa.item()))
 
             # Backward
             self.optimizer.zero_grad()
@@ -140,11 +210,11 @@ class Appr(object):
             mask=self.model.ac.mask(task,s=self.smax)
             mask = torch.autograd.Variable(mask.data.clone(),requires_grad=False)
             # Commented out the masking operation - start
-            # for n,p in self.model.named_parameters():
-                # if n in rnn_weights:
-                    # # print('n: ',n)
-                    # # print('p: ',p.grad.size())
-                    # p.grad.data*=self.model.get_view_for(n,mask)
+            for n,p in self.model.named_parameters():
+                if n in rnn_weights:
+                    # print('n: ',n)
+                    # print('p: ',p.grad.size())
+                    p.grad.data*=self.model.get_view_for(n,mask)
                     # Commented out the masking operation - end
 
             # Compensate embedding gradients
@@ -289,7 +359,7 @@ class Appr(object):
                     actual_output = torch.nn.Softmax(dim=1)(actual_output)
                     occ_output = torch.cat((actual_output,occ_output,actual_output), axis=0) # placeholder for CLS and SEP such that their attribution scores are 0
                     _,actual_pred = actual_output.max(1)
-                    _,pred=output.max(1)
+                    _,occ_pred=occ_output.max(1)
                     # print(occ_output)
                     # print(actual_output)
                     attributions_occ1_b = torch.subtract(actual_output,occ_output)[:,[actual_pred.item()]] # attributions towards the predicted class
@@ -328,16 +398,16 @@ class Appr(object):
                         attributions_occ1 = attributions_occ1_b
                         # attributions_occ2 = attributions_occ2_b
                         # attributions_occ_indices = attributions_occ_indices_b
-                        predictions = pred
-                        class_targets = targets
+                        predictions = actual_pred
+                        class_targets = targets[i:i+1]
                     else:
                         # attributions_ig = torch.cat((attributions_ig,attributions_ig_b), axis=0)
                         # attributions_ig_indices = torch.cat((attributions_ig_indices,attributions_ig_indices_b), axis=0)
                         attributions_occ1 = torch.cat((attributions_occ1,attributions_occ1_b), axis=0)
                         # attributions_occ2 = torch.cat((attributions_occ2,attributions_occ2_b), axis=0)
                         # attributions_occ_indices = torch.cat((attributions_occ_indices,attributions_occ_indices_b), axis=0)
-                        predictions = torch.cat((predictions,pred), axis=0)
-                        class_targets = torch.cat((class_targets,targets), axis=0)
+                        predictions = torch.cat((predictions,actual_pred), axis=0)
+                        class_targets = torch.cat((class_targets,targets[i:i+1]), axis=0)
                     # break
             # break
 
@@ -355,4 +425,4 @@ class Appr(object):
             # print('Predictions:',predictions.shape)
             return class_targets, predictions, attributions_occ1 #, attributions_occ2 #, attributions_occ_indices #attributions_ig, attributions_ig_indices, attributions_lrp
 
-        return total_loss/total_num,total_acc/total_num, f1_score(class_targets, predictions, average='macro', zero_division=1)
+        return total_loss/total_num,total_acc/total_num, f1_score(class_targets.detach().cpu(), predictions.detach().cpu(), average='macro', zero_division=1)

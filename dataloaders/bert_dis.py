@@ -130,6 +130,12 @@ def get(logger=None,args=None):
             example_tokens = tokenizer.tokenize(example.text_a)
             tokens.append(example_tokens[0:(args.max_seq_length - 2)])
         data[t]['train_tokens'] = tokens
+        test_examples = processor.get_test_examples(dataset)
+        tokens = []
+        for (ex_index, example) in enumerate(test_examples):
+            example_tokens = tokenizer.tokenize(example.text_a)
+            tokens.append(example_tokens[0:(args.max_seq_length - 2)])
+        data[t]['test_tokens'] = tokens
 
         data[t]['train'] = train_data
         data[t]['num_train_steps']=num_train_steps
